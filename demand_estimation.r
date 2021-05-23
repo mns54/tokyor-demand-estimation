@@ -33,7 +33,7 @@ data_biscuits <- data_biscuits %>%
   # 集計
   group_by(MONTH, STORECODE, SGRP, CMP, MBRD2) %>% 
   summarise(across(c(QTY, VALUE), sum), .groups="drop") %>% 
-  filter(QTY > 0) # 数量が1以上
+  filter(QTY > 0, VALUE > 0) # 数量および金額が0より大きい
 
 # いずれかの月において1店舗でしか販売されていない商品
 biscuits_only1shop <- data_biscuits %>% 
@@ -66,7 +66,7 @@ data_biscuits <- data_biscuits %>%
 data_biscuits <- data_biscuits %>% 
   mutate(price = VALUE / QTY)
 
-# 価格の操作変数として各商品の同月別店舗平均価格
+# 価格の操作変数として各商品の同月他店舗平均価格
 data_biscuits <- data_biscuits %>% 
   group_by(MONTH, MBRD2) %>% 
   mutate(price_instruments = (sum(price) - price) / (n() - 1)) %>% 
@@ -89,3 +89,61 @@ data_biscuits <- data_biscuits %>%
 
 ## nested logit推定
 
+nested_logit <- estimatr::iv_robust(
+  formula = log(share) - log(outshare) ~ log(price) + log(within_share) | log(price_instruments) + log(within_share_instruments),
+  data = data_biscuits,
+  fixed_effects = MBRD2,
+  clusters = MBRD2,
+  se_type = 'stata')
+
+summary(nested_logit) # 推定結果
+
+## nested logit 反実仮想
+
+# 予測値を出すために商品ダミーを明示的に説明変数に入れる
+nested_logit_prediction <- estimatr::iv_robust(
+  formula = log(share) - log(outshare) ~ log(price) + log(within_share) + factor(MBRD2) | log(price_instruments) + log(within_share_instruments) + factor(MBRD2),
+  data = data_biscuits
+)
+
+# オレオの価格を10%安くしてみる
+data_biscuits_counterfactual_nested <- data_biscuits %>% 
+  mutate(price = if_else(stringr::str_detect(MBRD2, "OREO"), price * 0.9, price))
+
+# 間接効用deltaを計算
+# モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
+delta_nested <- 
+  predict(nested_logit_prediction, newdata = data_biscuits_counterfactual_nested) -
+  coef(nested_logit)['log(within_share)'] * data_biscuits$within_share
+
+# deltaとrhoの列を加える
+data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
+  mutate(delta = delta_nested, rho = coef(nested_logit)['log(within_share)'])
+
+# 各グループの包括的価値(inclusive value)を計算する
+data_biscuits_counterfactual_nested_inclusive <- data_biscuits_counterfactual_nested %>% 
+  group_by(MONTH, STORECODE, SGRP) %>% 
+  summarise(inclusive = sum(exp(delta / (1 - rho))), .groups="drop") %>% # 各グループの包括的価値
+  mutate(rho = coef(nested_logit)['log(within_share)']) %>% 
+  group_by(MONTH, STORECODE) %>% 
+  mutate(inclusive_sum = 1 + sum(inclusive^(1-rho))) %>% # 包摂的価値の市場内集計
+  ungroup() %>% 
+  select(!rho)
+
+# 元のデータフレームに包摂的価値を引っ付ける
+data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
+  left_join(data_biscuits_counterfactual_nested_inclusive, by = c("MONTH", "STORECODE", "SGRP"))
+
+# 予測シェアと数量と売上金額を計算
+data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
+  mutate(share_predicted = exp(delta / (1 - rho)) / (inclusive^rho * inclusive_sum),
+         quantity_predicted = share_predicted * market_size,
+         value_predicted = price * quantity_predicted)
+
+# オレオの実際の売上と値下げ後の予測売上を比較
+data_biscuits_counterfactual_nested %>% 
+  filter(stringr::str_detect(MBRD2, "OREO")) %>% 
+  summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
+
+# モデルのフィットがあまり良くない?
+# 値下げしたら売上数量大幅ダウンになってしまった…
