@@ -114,7 +114,7 @@ data_biscuits_counterfactual_nested <- data_biscuits %>%
 # モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
 delta_nested <- 
   predict(nested_logit_prediction, newdata = data_biscuits_counterfactual_nested) -
-  coef(nested_logit)['log(within_share)'] * data_biscuits$within_share
+  coef(nested_logit)['log(within_share)'] * log(data_biscuits$within_share)
 
 # deltaとrhoの列を加える
 data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
@@ -144,6 +144,3 @@ data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>%
 data_biscuits_counterfactual_nested %>% 
   filter(stringr::str_detect(MBRD2, "OREO")) %>% 
   summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
-
-# モデルのフィットがあまり良くない?
-# 値下げしたら売上数量大幅ダウンになってしまった…
