@@ -87,6 +87,16 @@ data_biscuits <- data_biscuits %>%
 
 ## plain logit推定
 
+plain_logit <- estimatr::iv_robust(
+  formula = log(share) - log(outshare) ~ log(price) | log(price_instruments),
+  data = data_biscuits,
+  fixed_effects = MBRD2,
+  clusters = MBRD2,
+  se_type = 'stata'
+)
+
+summary(plain_logit) # 推定結果
+
 ## nested logit推定
 
 nested_logit <- estimatr::iv_robust(
