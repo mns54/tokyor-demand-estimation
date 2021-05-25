@@ -120,7 +120,7 @@ nested_logit_prediction <- estimatr::iv_robust(
 data_biscuits_counterfactual_nested <- data_biscuits %>% 
   mutate(price = if_else(stringr::str_detect(MBRD2, "OREO"), price * 0.9, price))
 
-# 間接効用deltaを計算
+# 平均効用deltaを計算
 # モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
 delta_nested <- 
   predict(nested_logit_prediction, newdata = data_biscuits_counterfactual_nested) -
