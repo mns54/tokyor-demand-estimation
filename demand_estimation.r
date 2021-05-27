@@ -52,8 +52,11 @@ data_biscuits <- data_biscuits %>%
 
 # 潜在的市場規模
 data_biscuits <- data_biscuits %>% 
-  # 月別店舗別最大売上数量1600くらいなのでとりあえず2000と設定
-  mutate(market_size = 2000) # 本当は店舗ごとに市場規模異なる設定にすべき?
+  group_by(MONTH, STORECODE) %>% 
+  mutate(quantity_total = sum(QTY)) %>% # 各市場の総売上数量
+  group_by(STORECODE) %>% 
+  mutate(market_size = max(quantity_total) * 2) %>%  #各店舗の最大総売上数量の2倍を潜在的市場規模とする
+  ungroup()
 
 # シェアの列作る
 data_biscuits <- data_biscuits %>% 
@@ -90,7 +93,7 @@ data_biscuits <- data_biscuits %>%
 plain_logit <- estimatr::iv_robust(
   formula = log(share) - log(outshare) ~ log(price) | log(price_instruments),
   data = data_biscuits,
-  fixed_effects = MBRD2,
+  fixed_effects = ~ MBRD2,
   clusters = MBRD2,
   se_type = 'stata'
 )
@@ -105,9 +108,9 @@ plain_logit_prediction <- estimatr::iv_robust(
   data = data_biscuits
 )
 
-# オレオの価格を10%安くしてみる
+# オレオの価格を20%安くしてみる
 data_biscuits_counterfactual_plain <- data_biscuits %>% 
-  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.9 * price, price))
+  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
 
 # 平均効用deltaを計算
 delta_plain <- predict(plain_logit_prediction,
@@ -148,9 +151,9 @@ nested_logit_prediction <- estimatr::iv_robust(
   data = data_biscuits
 )
 
-# オレオの価格を10%安くしてみる
+# オレオの価格を20%安くしてみる
 data_biscuits_counterfactual_nested <- data_biscuits %>% 
-  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.9 * price, price))
+  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
 
 # 平均効用deltaを計算
 # モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
