@@ -97,6 +97,38 @@ plain_logit <- estimatr::iv_robust(
 
 summary(plain_logit) # 推定結果
 
+## plain logit 反実仮想
+
+# 予測値を出すために商品ダミーを明示的に説明変数に入れる
+plain_logit_prediction <- estimatr::iv_robust(
+  formula = log(share) - log(outshare) ~ log(price) + factor(MBRD2) | log(price_instruments) + factor(MBRD2),
+  data = data_biscuits
+)
+
+# オレオの価格を10%安くしてみる
+data_biscuits_counterfactual_plain <- data_biscuits %>% 
+  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.9 * price, price))
+
+# 平均効用deltaを計算
+delta_plain <- predict(plain_logit_prediction,
+                       newdata = data_biscuits)
+
+# 反実仮想シェアを計算
+data_biscuits_counterfactual_plain <- 
+  data_biscuits %>% 
+  mutate(delta = delta_plain) %>% # 平均効用の列
+  group_by(MONTH, STORECODE) %>% # 市場でグループ化
+  mutate(share_predicted = exp(delta) / (1 + sum(exp(delta)))) %>% # シェア計算
+  ungroup() %>% 
+  mutate(quantity_predicted = share_predicted * market_size,
+         value_predicted = price * quantity_predicted)
+
+# MONDELEZの実際の売上と反実仮想売上を比較
+data_biscuits_counterfactual_plain %>% 
+  filter(CMP == "MONDELEZ INTERNATIONAL") %>% 
+  group_by(MBRD2) %>% 
+  summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
+
 ## nested logit推定
 
 nested_logit <- estimatr::iv_robust(
