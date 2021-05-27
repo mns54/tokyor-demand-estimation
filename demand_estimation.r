@@ -111,11 +111,11 @@ data_biscuits_counterfactual_plain <- data_biscuits %>%
 
 # 平均効用deltaを計算
 delta_plain <- predict(plain_logit_prediction,
-                       newdata = data_biscuits)
+                       newdata = data_biscuits_counterfactual_plain)
 
 # 反実仮想シェアを計算
 data_biscuits_counterfactual_plain <- 
-  data_biscuits %>% 
+  data_biscuits_counterfactual_plain %>% 
   mutate(delta = delta_plain) %>% # 平均効用の列
   group_by(MONTH, STORECODE) %>% # 市場でグループ化
   mutate(share_predicted = exp(delta) / (1 + sum(exp(delta)))) %>% # シェア計算
@@ -150,7 +150,7 @@ nested_logit_prediction <- estimatr::iv_robust(
 
 # オレオの価格を10%安くしてみる
 data_biscuits_counterfactual_nested <- data_biscuits %>% 
-  mutate(price = if_else(stringr::str_detect(MBRD2, "OREO"), price * 0.9, price))
+  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.9 * price, price))
 
 # 平均効用deltaを計算
 # モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
@@ -182,7 +182,8 @@ data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>%
          quantity_predicted = share_predicted * market_size,
          value_predicted = price * quantity_predicted)
 
-# オレオの実際の売上と値下げ後の予測売上を比較
+# MONDELEZの実際の売上と反実仮想売上を比較
 data_biscuits_counterfactual_nested %>% 
-  filter(stringr::str_detect(MBRD2, "OREO")) %>% 
+  filter(CMP == "MONDELEZ INTERNATIONAL") %>% 
+  group_by(MBRD2) %>% 
   summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
