@@ -141,7 +141,8 @@ data_biscuits_counterfactual_plain %>%
   summarise(across(c(QTY, quantity_fitted, quantity_counterfactual,
                      VALUE, value_fitted, value_counterfactual),
                    sum),
-            .groups="drop")
+            .groups="drop") %>% 
+  modelsummary::datasummary_df(fmt=1, output='markdown')
 
 ## nested logit推定
 
@@ -215,4 +216,5 @@ data_biscuits_counterfactual_nested %>%
   summarise(across(c(QTY, quantity_fitted, quantity_counterfactual,
                      VALUE, value_fitted, value_counterfactual),
                    sum),
-            .groups="drop")
+            .groups="drop") %>% 
+  modelsummary::datasummary_df(fmt=1)
