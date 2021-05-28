@@ -110,7 +110,8 @@ plain_logit_prediction <- estimatr::iv_robust(
 
 # オレオの価格を20%安くしてみる
 data_biscuits_counterfactual_plain <- data_biscuits %>% 
-  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
+  mutate(price_original = price, # 元の価格を残す
+         price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
 
 # 平均効用deltaを計算
 delta_plain <- predict(plain_logit_prediction,
@@ -119,18 +120,28 @@ delta_plain <- predict(plain_logit_prediction,
 # 反実仮想シェアを計算
 data_biscuits_counterfactual_plain <- 
   data_biscuits_counterfactual_plain %>% 
-  mutate(delta = delta_plain) %>% # 平均効用の列
+  mutate(delta_counterfactual = delta_plain, # 反実仮想の平均効用
+         delta_fitted = fitted(plain_logit) # 元の価格での平均効用のフィット
+         ) %>%
   group_by(MONTH, STORECODE) %>% # 市場でグループ化
-  mutate(share_predicted = exp(delta) / (1 + sum(exp(delta)))) %>% # シェア計算
+  # シェア計算
+  mutate(share_counterfactual = exp(delta_counterfactual) / (1 + sum(exp(delta_counterfactual))),
+         share_fitted = exp(delta_fitted) / (1 + sum(exp(delta_fitted)))) %>%
   ungroup() %>% 
-  mutate(quantity_predicted = share_predicted * market_size,
-         value_predicted = price * quantity_predicted)
+  # 数量と金額を計算
+  mutate(quantity_counterfactual = share_counterfactual * market_size,
+         quantity_fitted = share_fitted * market_size,
+         value_counterfactual = price * quantity_counterfactual,
+         value_fitted = price_original * quantity_fitted)
 
 # MONDELEZの実際の売上と反実仮想売上を比較
 data_biscuits_counterfactual_plain %>% 
   filter(CMP == "MONDELEZ INTERNATIONAL") %>% 
   group_by(MBRD2) %>% 
-  summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
+  summarise(across(c(QTY, quantity_fitted, quantity_counterfactual,
+                     VALUE, value_fitted, value_counterfactual),
+                   sum),
+            .groups="drop")
 
 ## nested logit推定
 
@@ -153,25 +164,34 @@ nested_logit_prediction <- estimatr::iv_robust(
 
 # オレオの価格を20%安くしてみる
 data_biscuits_counterfactual_nested <- data_biscuits %>% 
-  mutate(price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
+  mutate(price_original = price,
+         price = if_else(MBRD2 == "OREO (CREAM)", 0.8 * price, price))
 
 # 平均効用deltaを計算
 # モデルの予測値にはrho*log(within_share)の部分も含まれているのでそれを除く
+rho <- coef(nested_logit)['log(within_share)'] # rho
 delta_nested <- 
   predict(nested_logit_prediction, newdata = data_biscuits_counterfactual_nested) -
-  coef(nested_logit)['log(within_share)'] * log(data_biscuits$within_share)
+  rho * log(data_biscuits$within_share)
 
 # deltaとrhoの列を加える
 data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
-  mutate(delta = delta_nested, rho = coef(nested_logit)['log(within_share)'])
+  mutate(rho = rho,
+         delta_counterfactual = delta_nested,
+         delta_fitted = fitted(nested_logit) - rho * log(within_share))
 
 # 各グループの包括的価値(inclusive value)を計算する
 data_biscuits_counterfactual_nested_inclusive <- data_biscuits_counterfactual_nested %>% 
   group_by(MONTH, STORECODE, SGRP) %>% 
-  summarise(inclusive = sum(exp(delta / (1 - rho))), .groups="drop") %>% # 各グループの包括的価値
-  mutate(rho = coef(nested_logit)['log(within_share)']) %>% 
+  # 各グループの包括的価値
+  summarise(inclusive_counterfactual = sum(exp(delta_counterfactual / (1 - rho))),
+            inclusive_fitted = sum(exp(delta_fitted / (1 - rho))),
+            .groups="drop") %>%
+  mutate(rho = rho) %>% 
   group_by(MONTH, STORECODE) %>% 
-  mutate(inclusive_sum = 1 + sum(inclusive^(1-rho))) %>% # 包摂的価値の市場内集計
+  # 包摂的価値の市場内集計
+  mutate(inclusive_counterfactual_sum = 1 + sum(inclusive_counterfactual^(1-rho)),
+         inclusive_fitted_sum = 1 + sum(inclusive_fitted^(1-rho))) %>%
   ungroup() %>% 
   select(!rho)
 
@@ -181,12 +201,18 @@ data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>%
 
 # 予測シェアと数量と売上金額を計算
 data_biscuits_counterfactual_nested <- data_biscuits_counterfactual_nested %>% 
-  mutate(share_predicted = exp(delta / (1 - rho)) / (inclusive^rho * inclusive_sum),
-         quantity_predicted = share_predicted * market_size,
-         value_predicted = price * quantity_predicted)
+  mutate(share_counterfactual = exp(delta_counterfactual / (1 - rho)) / (inclusive_counterfactual^rho * inclusive_counterfactual_sum),
+         share_fitted = exp(delta_fitted / (1 - rho)) / (inclusive_fitted^rho * inclusive_fitted_sum),
+         quantity_counterfactual = share_counterfactual * market_size,
+         quantity_fitted = share_fitted * market_size,
+         value_counterfactual = price * quantity_counterfactual,
+         value_fitted = price_original * quantity_fitted)
 
 # MONDELEZの実際の売上と反実仮想売上を比較
 data_biscuits_counterfactual_nested %>% 
   filter(CMP == "MONDELEZ INTERNATIONAL") %>% 
   group_by(MBRD2) %>% 
-  summarise(across(c(QTY, quantity_predicted, VALUE, value_predicted), sum), .groups="drop")
+  summarise(across(c(QTY, quantity_fitted, quantity_counterfactual,
+                     VALUE, value_fitted, value_counterfactual),
+                   sum),
+            .groups="drop")
